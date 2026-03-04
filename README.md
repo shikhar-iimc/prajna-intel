@@ -37,7 +37,7 @@ NewsAPI → spaCy NLP → Neo4j Knowledge Graph → Groq LLM → Streamlit
 - Groq Llama 3.1 (inference)
 - spaCy (NLP entity extraction)
 - Streamlit (dashboard)
-- NewsAPI (live ingestion)
+- NewsAPI, GDELT API, The Guardian API (live ingestion)
 
 ## Team
 IIM Calcutta PGP | India Innovates 2026 | Domain 02: Digital Democracy
