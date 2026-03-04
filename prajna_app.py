@@ -1,4 +1,3 @@
-
 import streamlit as st
 from neo4j import GraphDatabase
 from groq import Groq
@@ -29,12 +28,12 @@ groq_client = get_groq()
 
 def get_week_key():
     now = datetime.now(timezone.utc)
-    return f"{{now.year}}-W{{now.strftime('%W')}}"
+    return f"{now.year}-W{now.strftime('%W')}"
 
 def ask_groq(prompt):
     r = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[{{"role": "user", "content": prompt}}],
+        messages=[{"role": "user", "content": prompt}],
         max_tokens=600, temperature=0.3
     )
     return r.choices[0].message.content
@@ -64,7 +63,7 @@ def get_graph_context(keywords):
             WHERE any(kw IN $kw WHERE toLower(e.name) CONTAINS toLower(kw))
             RETURN e.name AS e1, other.name AS e2, r.count AS strength
             ORDER BY r.count DESC LIMIT 20
-        """, {{"kw": keywords}})
+        """, {"kw": keywords})
         return [(r["e1"], r["e2"], r["strength"]) for r in result]
 
 def get_articles(keywords):
@@ -73,11 +72,10 @@ def get_articles(keywords):
             MATCH (a:Article)-[:MENTIONS]->(e:Entity)
             WHERE any(kw IN $kw WHERE toLower(e.name) CONTAINS toLower(kw))
             RETURN DISTINCT a.title AS title, a.source AS source LIMIT 5
-        """, {{"kw": keywords}})
+        """, {"kw": keywords})
         return [(r["title"], r["source"]) for r in result]
 
 def get_trajectory(e1, e2):
-    import re as _re
     with driver.session() as session:
         rows = session.run("""
             MATCH (a:Article)-[:MENTIONS]->(x:Entity {name:$e1})
@@ -87,44 +85,29 @@ def get_trajectory(e1, e2):
             ORDER BY week
         """, {"e1": e1, "e2": e2}).data()
     if not rows:
-        with driver.session() as session:
-            result = session.run("""
-                MATCH (a:Entity {name:$e1})-[r:CO_OCCURS_WITH]-(b:Entity {name:$e2})
-                RETURN r.weekly_counts_json AS wcj, r.count AS total
-            """, {"e1": e1, "e2": e2}).single()
-        if not result or not result["wcj"]:
-            return None, None
-        try:
-            wc = json.loads(result["wcj"])
-        except:
-            pairs = _re.findall('"(2026-W\d+)"\s*:\s*(\d+)', result["wcj"])
-            wc = {k: int(v) for k,v in pairs}
-        if not wc:
-            return None, None
-        return sorted(wc.items()), result["total"]
+        return None, None
     wc = {r["week"]: r["cnt"] for r in rows}
-    total = sum(wc.values())
-    return sorted(wc.items()), total
+    return sorted(wc.items()), sum(wc.values())
 
 def find_path(e1, e2):
     with driver.session() as session:
         result = session.run("""
             MATCH path = shortestPath(
-                (a:Entity {{name:$e1}})-[:CO_OCCURS_WITH*1..4]-(b:Entity {{name:$e2}})
+                (a:Entity {name:$e1})-[:CO_OCCURS_WITH*1..4]-(b:Entity {name:$e2})
             )
             RETURN [node IN nodes(path) | node.name] AS nodes,
                    [rel IN relationships(path) | rel.count] AS strengths,
                    length(path) AS hops
-        """, {{"e1": e1, "e2": e2}}).single()
+        """, {"e1": e1, "e2": e2}).single()
     if not result:
         return None
-    return {{"nodes": result["nodes"], "strengths": result["strengths"], "hops": result["hops"]}}
+    return {"nodes": result["nodes"], "strengths": result["strengths"], "hops": result["hops"]}
 
-BLOCKLIST = {{
+BLOCKLIST = {
     "Supreme","Asian","Islam","American","European","Western","Eastern",
     "BBC","CNN","Reuters","Bloomberg","NDTV","Mint","Hindu","Express",
     "ANI","PTI","AFP","AP","Wire","Tribune","Times","Globe","Newswire"
-}}
+}
 
 def detect_surges(threshold=1.5, top_n=5):
     week_key = get_week_key()
@@ -145,14 +128,13 @@ def detect_surges(threshold=1.5, top_n=5):
         entity_weekly[e][row["week"]] += row["cnt"]
 
     entity_total = {e: sum(w.values()) for e, w in entity_weekly.items()}
-
     surges = []
     for entity, weekly in entity_weekly.items():
         if entity in BLOCKLIST:                                      continue
         if entity_total[entity] < 8:                                 continue
         if len(entity) > 35:                                         continue
         if any(c.isdigit() for c in entity):                         continue
-        if entity_type.get(entity) not in {{"GPE","ORG","PERSON","NORP"}}: continue
+        if entity_type.get(entity) not in {"GPE","ORG","PERSON","NORP"}: continue
         weeks = sorted(weekly.keys())
         if not weeks or weeks[-1] != week_key:                       continue
         latest   = weekly[weeks[-1]]
@@ -161,39 +143,39 @@ def detect_surges(threshold=1.5, top_n=5):
         if baseline == 0: continue
         ratio = latest / baseline
         if ratio >= threshold:
-            surges.append({{
+            surges.append({
                 "entity":   entity,
                 "type":     entity_type.get(entity, ""),
                 "latest":   latest,
                 "baseline": round(baseline, 1),
                 "ratio":    round(ratio, 2),
                 "total":    entity_total[entity]
-            }})
+            })
     surges.sort(key=lambda x: x["ratio"], reverse=True)
     return surges[:top_n]
 
 def build_graph_visual(keyword=None, week=None):
-    TYPE_COLORS = {{
+    TYPE_COLORS = {
         "GPE":    "#C8A96E",
         "ORG":    "#6B8CAE",
         "PERSON": "#A8C5A0",
         "NORP":   "#B8956A",
         "LOC":    "#8AABBA",
         "EVENT":  "#C47B6E"
-    }}
+    }
     import re as _re
     def _parse_wcj(s):
-        if not s: return {{}}
+        if not s: return {}
         try: return json.loads(s)
         except:
             pairs = _re.findall(r'"(2026-W\d+)"\s*:\s*(\d+)', s)
-            return {{k: int(v) for k,v in pairs}}
+            return {k: int(v) for k,v in pairs}
 
     with driver.session() as session:
         if week:
             if keyword:
                 res = session.run("""
-                    MATCH (a:Article {{week:$week}})-[:MENTIONS]->(e:Entity)
+                    MATCH (a:Article {week:$week})-[:MENTIONS]->(e:Entity)
                     WHERE toLower(e.name) CONTAINS $kw
                     WITH COLLECT(DISTINCT e) AS seed
                     UNWIND seed AS e
@@ -205,17 +187,17 @@ def build_graph_visual(keyword=None, week=None):
                     WITH node, COUNT(r) AS conn
                     ORDER BY conn DESC LIMIT 40
                     RETURN node.name AS name, node.type AS type, conn
-                """, {{"week": week, "kw": keyword.lower()}})
+                """, {"week": week, "kw": keyword.lower()})
             else:
                 res = session.run("""
-                    MATCH (a:Article {{week:$week}})-[:MENTIONS]->(e:Entity)
+                    MATCH (a:Article {week:$week})-[:MENTIONS]->(e:Entity)
                     WITH DISTINCT e
                     MATCH (e)-[r:CO_OCCURS_WITH]-()
                     WHERE r.weekly_counts_json CONTAINS $week
                     WITH e, COUNT(r) AS conn
                     ORDER BY conn DESC LIMIT 40
                     RETURN e.name AS name, e.type AS type, conn
-                """, {{"week": week}})
+                """, {"week": week})
         else:
             if keyword:
                 res = session.run("""
@@ -223,18 +205,18 @@ def build_graph_visual(keyword=None, week=None):
                     WITH e MATCH (e)-[:CO_OCCURS_WITH]-(other:Entity)
                     WITH collect(DISTINCT e)+collect(DISTINCT other) AS nl
                     UNWIND nl AS node WITH DISTINCT node
-                    WITH node, COUNT{{(node)--()}} AS conn
+                    WITH node, COUNT{(node)--()} AS conn
                     ORDER BY conn DESC LIMIT 40
                     RETURN node.name AS name, node.type AS type, conn
-                """, {{"kw": keyword.lower()}})
+                """, {"kw": keyword.lower()})
             else:
                 res = session.run("""
                     MATCH (e:Entity)
-                    WITH e, COUNT{{(e)--()}} AS conn
+                    WITH e, COUNT{(e)--()} AS conn
                     ORDER BY conn DESC LIMIT 40
                     RETURN e.name AS name, e.type AS type, conn
                 """)
-        top = {{r["name"]: r for r in res}}
+        top = {r["name"]: r for r in res}
 
         # ── Get edges — use weekly counts if week selected ──
         if week:
@@ -244,45 +226,45 @@ def build_graph_visual(keyword=None, week=None):
                 AND r.weekly_counts_json IS NOT NULL
                 RETURN e1.name AS source, e2.name AS target,
                        r.weekly_counts_json AS wcj
-            """, {{"names": list(top.keys())}})
+            """, {"names": list(top.keys())})
             relationships = []
             for r in rels:
-                wc = json.loads(r["wcj"]) if r["wcj"] else {{}}
+                wc = json.loads(r["wcj"]) if r["wcj"] else {}
                 w  = wc.get(week, 0)
                 if w >= 1:
-                    relationships.append({{
+                    relationships.append({
                         "source": r["source"],
                         "target": r["target"],
                         "weight": w
-                    }})
+                    })
         else:
             rels = session.run("""
                 MATCH (e1:Entity)-[r:CO_OCCURS_WITH]-(e2:Entity)
                 WHERE e1.name IN $names AND e2.name IN $names AND r.count >= 2
                 RETURN e1.name AS source, e2.name AS target, r.count AS weight
-            """, {{"names": list(top.keys())}})
+            """, {"names": list(top.keys())})
             relationships = [dict(r) for r in rels]
 
     # ── Build PyVis ──
     net = Network(height="460px", width="100%", bgcolor="#0A0C0F",
                   font_color="#8A9BB0", notebook=False, cdn_resources="in_line")
     net.set_options("""
-    {{
-      "physics": {{
-        "forceAtlas2Based": {{
+    {
+      "physics": {
+        "forceAtlas2Based": {
           "gravitationalConstant": -60,
           "centralGravity": 0.008,
           "springLength": 140,
           "springConstant": 0.06
-        }},
+        },
         "solver": "forceAtlas2Based",
-        "stabilization": {{"iterations": 120}}
-      }},
-      "edges": {{
-        "smooth": {{"type": "continuous"}},
-        "color": {{"opacity": 0.4}}
-      }}
-    }}
+        "stabilization": {"iterations": 120}
+      },
+      "edges": {
+        "smooth": {"type": "continuous"},
+        "color": {"opacity": 0.4}
+      }
+    }
     """)
 
     for name, data in top.items():
@@ -290,21 +272,21 @@ def build_graph_visual(keyword=None, week=None):
         color    = "#E8D5A3" if is_india else TYPE_COLORS.get(data["type"], "#5A6A7A")
         size     = 58 if is_india else min(12 + data["conn"] * 1.8, 52)
         net.add_node(name, label=name,
-            color={{
+            color={
                 "background":  color,
                 "border":      "#FFFFFF" if is_india else color,
-                "highlight":   {{"background": "#E8D5A3", "border": "#FFFFFF"}}
-            }},
+                "highlight":   {"background": "#E8D5A3", "border": "#FFFFFF"}
+            },
             size=size,
-            title=f"{{data['type']}} · {{data['conn']}} connections",
-            font={{"size": 11, "color": "#C8D4E0", "face": "IBM Plex Mono"}})
+            title=f"{data['type']} · {data['conn']} connections",
+            font={"size": 11, "color": "#C8D4E0", "face": "IBM Plex Mono"})
 
     for r in relationships:
         if r["source"] in top and r["target"] in top:
             net.add_edge(r["source"], r["target"],
                 value=min(r["weight"] * 0.4, 4),
-                title=f"co-occurrence: {{r['weight']}}",
-                color={{"color": "#2A3A4A", "highlight": "#C8A96E"}})
+                title=f"co-occurrence: {r['weight']}",
+                color={"color": "#2A3A4A", "highlight": "#C8A96E"})
 
     net.save_graph("graph_visual.html")
     with open("graph_visual.html", "r") as f:
@@ -325,184 +307,184 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
-*, *::before, *::after {{ box-sizing: border-box; }}
-html, body, .stApp {{
+*, *::before, *::after { box-sizing: border-box; }
+html, body, .stApp {
     background-color: #0A0C0F !important;
     color: #C8D4E0 !important;
     font-family: 'IBM Plex Sans', sans-serif !important;
-}}
-#MainMenu, footer, header {{ visibility: hidden; }}
-.stDeployButton {{ display: none; }}
-section[data-testid="stSidebar"] {{ display: none; }}
+}
+#MainMenu, footer, header { visibility: hidden; }
+.stDeployButton { display: none; }
+section[data-testid="stSidebar"] { display: none; }
 
-.prajna-nav {{
+.prajna-nav {
     display: flex; align-items: center;
     justify-content: space-between;
     padding: 0 0 20px 0;
     border-bottom: 1px solid #1C2A38;
     margin-bottom: 20px;
-}}
-.prajna-logo {{
+}
+.prajna-logo {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 13px; font-weight: 600;
     letter-spacing: 0.25em; color: #E8D5A3; text-transform: uppercase;
-}}
-.prajna-logo span {{ color: #4A6A8A; margin: 0 12px; }}
-.prajna-meta {{
+}
+.prajna-logo span { color: #4A6A8A; margin: 0 12px; }
+.prajna-meta {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 10px; color: #3A5068;
     letter-spacing: 0.1em; text-transform: uppercase;
-}}
-.prajna-status {{
+}
+.prajna-status {
     display: flex; align-items: center; gap: 6px;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 10px; color: #4A8A6A; letter-spacing: 0.1em;
-}}
-.status-dot {{
+}
+.status-dot {
     width: 6px; height: 6px; background: #4A8A6A;
     border-radius: 50%; animation: pulse 2s infinite;
-}}
-@keyframes pulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.3; }} }}
+}
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
 
-.stTabs [data-baseweb="tab-list"] {{
+.stTabs [data-baseweb="tab-list"] {
     background: transparent !important;
     border-bottom: 1px solid #1C2A38 !important;
     gap: 0 !important; padding: 0 !important;
-}}
-.stTabs [data-baseweb="tab"] {{
+}
+.stTabs [data-baseweb="tab"] {
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 10px !important; font-weight: 500 !important;
     letter-spacing: 0.15em !important; text-transform: uppercase !important;
     color: #3A5068 !important; background: transparent !important;
     border: none !important; border-bottom: 2px solid transparent !important;
     padding: 10px 20px !important; border-radius: 0 !important;
-}}
-.stTabs [aria-selected="true"] {{
+}
+.stTabs [aria-selected="true"] {
     color: #E8D5A3 !important;
     border-bottom: 2px solid #E8D5A3 !important;
     background: transparent !important;
-}}
-.stTabs [data-baseweb="tab-panel"] {{
+}
+.stTabs [data-baseweb="tab-panel"] {
     padding-top: 24px !important; background: transparent !important;
-}}
+}
 
-.stTextInput > div > div > input {{
+.stTextInput > div > div > input {
     background: #0D1117 !important; border: 1px solid #1C2A38 !important;
     border-radius: 0 !important; color: #C8D4E0 !important;
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 13px !important; padding: 10px 14px !important;
-}}
-.stTextInput > div > div > input:focus {{
+}
+.stTextInput > div > div > input:focus {
     border-color: #C8A96E !important; box-shadow: none !important;
-}}
-.stTextInput label {{
+}
+.stTextInput label {
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 9px !important; text-transform: uppercase !important;
     letter-spacing: 0.15em !important; color: #3A5068 !important;
-}}
+}
 
-.stSelectbox > div > div {{
+.stSelectbox > div > div {
     background: #0D1117 !important; border: 1px solid #1C2A38 !important;
     border-radius: 0 !important; color: #C8D4E0 !important;
     font-family: 'IBM Plex Mono', monospace !important; font-size: 11px !important;
-}}
-.stSelectbox label {{
+}
+.stSelectbox label {
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 9px !important; text-transform: uppercase !important;
     letter-spacing: 0.15em !important; color: #3A5068 !important;
-}}
+}
 
-.stButton > button {{
+.stButton > button {
     background: transparent !important; border: 1px solid #2A3A4A !important;
     border-radius: 0 !important; color: #8A9BB0 !important;
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 10px !important; font-weight: 500 !important;
     letter-spacing: 0.15em !important; text-transform: uppercase !important;
     padding: 8px 20px !important; transition: all 0.15s ease !important;
-}}
-.stButton > button:hover {{
+}
+.stButton > button:hover {
     background: #1C2A38 !important; border-color: #C8A96E !important;
     color: #E8D5A3 !important;
-}}
-.stButton > button:focus {{ box-shadow: none !important; outline: none !important; }}
+}
+.stButton > button:focus { box-shadow: none !important; outline: none !important; }
 
-.stSlider > div > div > div {{ background: #1C2A38 !important; }}
-.stSlider label {{
+.stSlider > div > div > div { background: #1C2A38 !important; }
+.stSlider label {
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 9px !important; text-transform: uppercase !important;
     letter-spacing: 0.15em !important; color: #3A5068 !important;
-}}
+}
 
-.brief-container {{
+.brief-container {
     border: 1px solid #1C2A38; border-left: 3px solid #C8A96E;
     background: #0D1117; padding: 20px 24px; margin: 16px 0;
     font-family: 'IBM Plex Sans', sans-serif; font-size: 13px;
     line-height: 1.8; color: #A8B8C8;
-}}
-.brief-header {{
+}
+.brief-header {
     font-family: 'IBM Plex Mono', monospace; font-size: 9px;
     color: #C8A96E; text-transform: uppercase; letter-spacing: 0.2em;
     margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #1C2A38;
-}}
-.path-node {{
+}
+.path-node {
     display: flex; align-items: center; gap: 12px;
     padding: 10px 16px; margin: 2px 0;
     background: #0D1117; border: 1px solid #1C2A38;
     font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C8D4E0;
-}}
-.path-node.start {{ border-left: 3px solid #6B8CAE; }}
-.path-node.end   {{ border-left: 3px solid #C8A96E; }}
-.path-node.mid   {{ border-left: 3px solid #2A3A4A; margin-left: 20px; }}
-.path-connector  {{
+}
+.path-node.start { border-left: 3px solid #6B8CAE; }
+.path-node.end   { border-left: 3px solid #C8A96E; }
+.path-node.mid   { border-left: 3px solid #2A3A4A; margin-left: 20px; }
+.path-connector  {
     margin-left: 28px; padding: 4px 16px;
     font-family: 'IBM Plex Mono', monospace; font-size: 10px;
     color: #2A4A3A; letter-spacing: 0.1em;
-}}
-.source-tag {{
+}
+.source-tag {
     font-family: 'IBM Plex Mono', monospace; font-size: 9px;
     color: #3A5068; border: 1px solid #1C2A38;
     padding: 3px 8px; letter-spacing: 0.08em; text-transform: uppercase;
-}}
-.surge-card {{
+}
+.surge-card {
     border: 1px solid #1C2A38; border-left: 3px solid #8A4A3A;
     background: #0D1117; padding: 16px 20px; margin: 8px 0;
-}}
-.surge-entity {{
+}
+.surge-entity {
     font-family: 'IBM Plex Mono', monospace; font-size: 13px;
     font-weight: 600; color: #E8D5A3;
     letter-spacing: 0.1em; text-transform: uppercase;
-}}
-.surge-ratio {{
+}
+.surge-ratio {
     font-family: 'IBM Plex Mono', monospace; font-size: 11px;
     color: #C87B6A; margin-top: 2px;
-}}
-.section-label {{
+}
+.section-label {
     font-family: 'IBM Plex Mono', monospace; font-size: 9px;
     color: #3A5068; text-transform: uppercase; letter-spacing: 0.2em;
     margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #1C2A38;
-}}
-div[data-testid="metric-container"] {{
+}
+div[data-testid="metric-container"] {
     background: #0D1117 !important; border: 1px solid #1C2A38 !important;
     border-radius: 0 !important; padding: 12px 16px !important;
-}}
-div[data-testid="metric-container"] label {{
+}
+div[data-testid="metric-container"] label {
     font-family: 'IBM Plex Mono', monospace !important; font-size: 9px !important;
     text-transform: uppercase !important; letter-spacing: 0.15em !important;
     color: #3A5068 !important;
-}}
-div[data-testid="metric-container"] div[data-testid="stMetricValue"] {{
+}
+div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 20px !important; color: #E8D5A3 !important;
-}}
-::-webkit-scrollbar {{ width: 4px; }}
-::-webkit-scrollbar-track {{ background: #0A0C0F; }}
-::-webkit-scrollbar-thumb {{ background: #1C2A38; }}
-.stSpinner > div {{ border-top-color: #C8A96E !important; }}
-.stAlert {{
+}
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0A0C0F; }
+::-webkit-scrollbar-thumb { background: #1C2A38; }
+.stSpinner > div { border-top-color: #C8A96E !important; }
+.stAlert {
     background: #0D1117 !important; border: 1px solid #1C2A38 !important;
     border-radius: 0 !important; font-family: 'IBM Plex Mono', monospace !important;
     font-size: 11px !important; color: #5A7A9A !important;
-}}
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -517,12 +499,12 @@ try:
 except:
     articles_n, entities_n, rels_n = 0, 0, 0
 
-logo_html = f'<img src="data:image/svg+xml;base64,{{LOGO_B64}}" width="52" height="52" style="opacity:0.95"/>' if LOGO_B64 else ""
+logo_html = f'<img src="data:image/svg+xml;base64,{LOGO_B64}" width="52" height="52" style="opacity:0.95"/>' if LOGO_B64 else ""
 
 st.markdown(f"""
 <div class="prajna-nav">
     <div style="display:flex;align-items:center;gap:16px">
-        {{logo_html}}
+        {logo_html}
         <div>
             <div class="prajna-logo">PRAJNA<span>▪</span>Strategic Intelligence Engine</div>
             <div class="prajna-meta" style="margin-top:4px">
@@ -534,7 +516,7 @@ st.markdown(f"""
         <div class="prajna-status">
             <div class="status-dot"></div>GRAPH ACTIVE
         </div>
-        <div class="prajna-meta" style="margin-top:4px">{{now_str}}</div>
+        <div class="prajna-meta" style="margin-top:4px">{now_str}</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -587,7 +569,7 @@ with tab1:
             "Israel Iran war implications",
         ]
         for dq in demo_queries:
-            if st.button(dq.upper(), key=f"dq_{{dq}}"):
+            if st.button(dq.upper(), key=f"dq_{dq}"):
                 st.session_state["query_input"] = dq
                 st.rerun()
 
@@ -599,19 +581,19 @@ with tab1:
                 keywords     = [w for w in query.lower().split() if len(w) > 3][:5]
                 context      = get_graph_context(keywords)
                 articles_ctx = get_articles(keywords)
-                ctx_str      = "\n".join([f"  {{e1}} <-> {{e2}} (strength:{{s}})" for e1, e2, s in context])
-                art_str      = "\n".join([f"  [{{src}}] {{title}}" for title, src in articles_ctx])
+                ctx_str      = "\\n".join([f"  {e1} <-> {e2} (strength:{s})" for e1, e2, s in context])
+                art_str      = "\\n".join([f"  [{src}] {title}" for title, src in articles_ctx])
 
                 prompt = f"""You are Prajna, India's strategic intelligence engine.
 Answer ONLY from the graph context below. Cite every claim with its source.
 
 KNOWLEDGE GRAPH CONNECTIONS:
-{{ctx_str}}
+{ctx_str}
 
 NEWS SOURCES:
-{{art_str}}
+{art_str}
 
-QUESTION: {{query}}
+QUESTION: {query}
 
 Structure your response as:
 SITUATION — 2-3 sentence summary of the current state
@@ -624,18 +606,18 @@ SOURCES — list all cited sources"""
 
             sources_html = ""
             if articles_ctx:
-                tags = "".join([f'<span class="source-tag">{{src}}</span>' for _, src in articles_ctx[:6]])
-                sources_html = f'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid #1C2A38">{{tags}}</div>'
+                tags = "".join([f'<span class="source-tag">{src}</span>' for _, src in articles_ctx[:6]])
+                sources_html = f'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid #1C2A38">{tags}</div>'
 
             st.markdown(f"""
             <div class="brief-container">
                 <div class="brief-header">
                     ▪ INTELLIGENCE BRIEF &nbsp;·&nbsp;
-                    {{datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}}
-                    &nbsp;·&nbsp; {{len(context)}} graph connections analysed
+                    {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+                    &nbsp;·&nbsp; {len(context)} graph connections analysed
                 </div>
-                {{brief.replace(chr(10), "<br>")}}
-                {{sources_html}}
+                {brief.replace(chr(10), "<br>")}
+                {sources_html}
             </div>
             """, unsafe_allow_html=True)
 
@@ -672,10 +654,10 @@ SOURCES — list all cited sources"""
                     week=week_param
                 )
                 components.html(graph_html, height=460)
-                week_label = f"Showing: {{selected_week}}" if week_param else "Showing: All time"
-                st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:9px;color:#2A3A4A;text-transform:uppercase;letter-spacing:0.1em;margin-top:8px">{{week_label}} &nbsp;·&nbsp; Node size = connection strength &nbsp;·&nbsp; Drag to explore &nbsp;·&nbsp; Hover for details</div>', unsafe_allow_html=True)
+                week_label = f"Showing: {selected_week}" if week_param else "Showing: All time"
+                st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:9px;color:#2A3A4A;text-transform:uppercase;letter-spacing:0.1em;margin-top:8px">{week_label} &nbsp;·&nbsp; Node size = connection strength &nbsp;·&nbsp; Drag to explore &nbsp;·&nbsp; Hover for details</div>', unsafe_allow_html=True)
             except Exception as e:
-                st.error(f"Graph error: {{e}}")
+                st.error(f"Graph error: {e}")
 
 
 # ── TAB 2: TRAJECTORY ANALYSIS ─────────────
@@ -697,20 +679,20 @@ with tab2:
             weekly_data, total = get_trajectory(e1, e2)
 
         if not weekly_data:
-            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:11px;color:#5A3A3A;border:1px solid #2A1A1A;padding:14px 18px;background:#0D0A0A">▪ NO TRAJECTORY DATA — {{e1.upper()}} ↔ {{e2.upper()}}<br><span style="color:#2A3A4A;font-size:9px">These entities may not co-occur in graph. Try: India/Iran · Iran/Israel · India/Russia</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:11px;color:#5A3A3A;border:1px solid #2A1A1A;padding:14px 18px;background:#0D0A0A">▪ NO TRAJECTORY DATA — {e1.upper()} ↔ {e2.upper()}<br><span style="color:#2A3A4A;font-size:9px">These entities may not co-occur in graph. Try: India/Iran · Iran/Israel · India/Russia</span></div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:10px;color:#4A6A4A;border:1px solid #1A2A1A;padding:10px 16px;background:#0A0D0A;margin-bottom:16px">▪ {{e1.upper()}} ↔ {{e2.upper()}} &nbsp;·&nbsp; {{total}} TOTAL CO-OCCURRENCES &nbsp;·&nbsp; {{len(weekly_data)}} WEEK(S) OF DATA</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:10px;color:#4A6A4A;border:1px solid #1A2A1A;padding:10px 16px;background:#0A0D0A;margin-bottom:16px">▪ {e1.upper()} ↔ {e2.upper()} &nbsp;·&nbsp; {total} TOTAL CO-OCCURRENCES &nbsp;·&nbsp; {len(weekly_data)} WEEK(S) OF DATA</div>', unsafe_allow_html=True)
 
             df = pd.DataFrame(weekly_data, columns=["Week", "Co-occurrences"])
             st.bar_chart(df.set_index("Week"), color="#C8A96E")
 
-            traj_str = "\n".join([f"  {{w}}: {{c}}" for w, c in weekly_data])
+            traj_str = "\\n".join([f"  {w}: {c}" for w, c in weekly_data])
             prompt = f"""You are Prajna. Analyse this relationship trajectory:
 
-{{e1}} ↔ {{e2}}
+{e1} ↔ {e2}
 Weekly co-occurrence data:
-{{traj_str}}
-Total all-time co-occurrences: {{total}}
+{traj_str}
+Total all-time co-occurrences: {total}
 
 SITUATION — is this relationship intensifying, cooling, or volatile?
 INFLECTION POINTS — any sharp changes and their likely geopolitical causes
@@ -722,7 +704,7 @@ Be analytical and specific. Max 250 words."""
             with st.spinner(""):
                 brief = ask_groq(prompt)
 
-            st.markdown(f'<div class="brief-container"><div class="brief-header">▪ TRAJECTORY INTERPRETATION — {{e1.upper()}} ↔ {{e2.upper()}}</div>{{brief.replace(chr(10), "<br>")}}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="brief-container"><div class="brief-header">▪ TRAJECTORY INTERPRETATION — {e1.upper()} ↔ {e2.upper()}</div>{brief.replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
 
 
 # ── TAB 3: PATH QUERY ──────────────────────
@@ -744,35 +726,35 @@ with tab3:
             path = find_path(p1, p2)
 
         if not path:
-            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:11px;color:#5A3A3A;border:1px solid #2A1A1A;padding:14px 18px;background:#0D0A0A">▪ NO PATH FOUND — {{p1.upper()}} → {{p2.upper()}}<br><span style="color:#2A3A4A;font-size:9px">No connection within 4 hops. Try different entity names.</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:11px;color:#5A3A3A;border:1px solid #2A1A1A;padding:14px 18px;background:#0D0A0A">▪ NO PATH FOUND — {p1.upper()} → {p2.upper()}<br><span style="color:#2A3A4A;font-size:9px">No connection within 4 hops. Try different entity names.</span></div>', unsafe_allow_html=True)
         else:
             nodes     = path["nodes"]
             strengths = path["strengths"]
 
-            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:10px;color:#4A6A4A;border:1px solid #1A2A1A;padding:10px 16px;background:#0A0D0A;margin-bottom:16px">▪ PATH FOUND &nbsp;·&nbsp; {{path["hops"]}} HOP(S) &nbsp;·&nbsp; {{p1.upper()}} → {{p2.upper()}}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:10px;color:#4A6A4A;border:1px solid #1A2A1A;padding:10px 16px;background:#0A0D0A;margin-bottom:16px">▪ PATH FOUND &nbsp;·&nbsp; {path["hops"]} HOP(S) &nbsp;·&nbsp; {p1.upper()} → {p2.upper()}</div>', unsafe_allow_html=True)
 
             nodes_html = ""
             path_str   = ""
             for i, node in enumerate(nodes):
                 if i == 0:
-                    nodes_html += f'<div class="path-node start">▶ &nbsp; {{node.upper()}}</div>'
+                    nodes_html += f'<div class="path-node start">▶ &nbsp; {node.upper()}</div>'
                     path_str   += node
                 elif i == len(nodes) - 1:
-                    nodes_html += f'<div class="path-node end">◼ &nbsp; {{node.upper()}}</div>'
+                    nodes_html += f'<div class="path-node end">◼ &nbsp; {node.upper()}</div>'
                     path_str   += node
                 else:
-                    nodes_html += f'<div class="path-node mid">◦ &nbsp; {{node}}</div>'
+                    nodes_html += f'<div class="path-node mid">◦ &nbsp; {node}</div>'
                     path_str   += node
                 if i < len(strengths):
-                    nodes_html += f'<div class="path-connector">│ co-occurs {{strengths[i]}}× in news</div>'
-                    path_str   += f" --[{{strengths[i]}}x]--> "
+                    nodes_html += f'<div class="path-connector">│ co-occurs {strengths[i]}× in news</div>'
+                    path_str   += f" --[{strengths[i]}x]--> "
 
             st.markdown(nodes_html, unsafe_allow_html=True)
 
             prompt = f"""You are Prajna. A knowledge graph path query revealed:
 
-PATH: {{path_str}}
-HOPS: {{path["hops"]}}
+PATH: {path_str}
+HOPS: {path["hops"]}
 
 Each arrow represents two entities co-appearing in real news articles.
 The number = frequency of co-appearance in the corpus.
@@ -787,7 +769,7 @@ Be direct and specific. Max 220 words."""
             with st.spinner(""):
                 brief = ask_groq(prompt)
 
-            st.markdown(f'<div class="brief-container" style="margin-top:16px"><div class="brief-header">▪ PATH INTELLIGENCE — {{p1.upper()}} → {{p2.upper()}}</div>{{brief.replace(chr(10), "<br>")}}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="brief-container" style="margin-top:16px"><div class="brief-header">▪ PATH INTELLIGENCE — {p1.upper()} → {p2.upper()}</div>{brief.replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
 
 
 # ── TAB 4: SURGE DETECTION ─────────────────
@@ -807,7 +789,7 @@ with tab4:
             surges = detect_surges(threshold=threshold)
 
         if not surges:
-            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:11px;color:#3A5068;border:1px solid #1C2A38;padding:14px 18px;background:#0D1117;margin-bottom:16px">▪ NO SURGES DETECTED ABOVE {{threshold}}× THRESHOLD<br><span style="font-size:9px;color:#2A3A4A">Surge detection strengthens as more weeks accumulate in the graph.</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:11px;color:#3A5068;border:1px solid #1C2A38;padding:14px 18px;background:#0D1117;margin-bottom:16px">▪ NO SURGES DETECTED ABOVE {threshold}× THRESHOLD<br><span style="font-size:9px;color:#2A3A4A">Surge detection strengthens as more weeks accumulate in the graph.</span></div>', unsafe_allow_html=True)
 
             # Show top entities by connection as fallback
             st.markdown('<div class="section-label" style="margin-top:20px">Current Top Entities by Connection Strength</div>', unsafe_allow_html=True)
@@ -819,22 +801,22 @@ with tab4:
                     ORDER BY conn DESC LIMIT 12
                 """).data()
             rows = "".join([
-                f'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid #0D1117;font-family:IBM Plex Mono;font-size:10px;color:#5A7A9A"><span>{{r["name"].upper()}}</span><span style="color:#3A5068">{{r["conn"]}} connections</span></div>'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid #0D1117;font-family:IBM Plex Mono;font-size:10px;color:#5A7A9A"><span>{r["name"].upper()}</span><span style="color:#3A5068">{r["conn"]} connections</span></div>'
                 for r in top if len(r["name"]) < 35
             ])
-            st.markdown(f'<div style="border:1px solid #1C2A38;background:#0D1117">{{rows}}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="border:1px solid #1C2A38;background:#0D1117">{rows}</div>', unsafe_allow_html=True)
 
         else:
-            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:10px;color:#C87B6A;border:1px solid #2A1A1A;padding:10px 16px;background:#0D0A0A;margin-bottom:16px">▪ {{len(surges)}} ENTITIES FLAGGED ABOVE {{threshold}}× BASELINE</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:10px;color:#C87B6A;border:1px solid #2A1A1A;padding:10px 16px;background:#0D0A0A;margin-bottom:16px">▪ {len(surges)} ENTITIES FLAGGED ABOVE {threshold}× BASELINE</div>', unsafe_allow_html=True)
 
             for surge in surges:
-                st.markdown(f'<div class="surge-card"><div class="surge-entity">▲ {{surge["entity"]}}</div><div class="surge-ratio">{{surge["ratio"]}}× baseline &nbsp;·&nbsp; {{surge["latest"]}} connections this week &nbsp;·&nbsp; baseline: {{surge["baseline"]}}/week</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="surge-card"><div class="surge-entity">▲ {surge["entity"]}</div><div class="surge-ratio">{surge["ratio"]}× baseline &nbsp;·&nbsp; {surge["latest"]} connections this week &nbsp;·&nbsp; baseline: {surge["baseline"]}/week</div></div>', unsafe_allow_html=True)
 
                 prompt = f"""Prajna surge alert:
-Entity: {{surge["entity"]}} ({{surge["type"]}})
-This week: {{surge["latest"]}} news co-occurrences
-Historical baseline: {{surge["baseline"]}} per week
-Surge ratio: {{surge["ratio"]}}×
+Entity: {surge["entity"]} ({surge["type"]})
+This week: {surge["latest"]} news co-occurrences
+Historical baseline: {surge["baseline"]} per week
+Surge ratio: {surge["ratio"]}×
 
 SURGE EXPLANATION — why is this entity surging in the news?
 INDIA RISK/OPPORTUNITY — what are the strategic implications for India?
@@ -846,13 +828,13 @@ Max 130 words. Be direct and analytical."""
                 with st.spinner(""):
                     brief = ask_groq(prompt)
 
-                st.markdown(f'<div class="brief-container" style="border-left-color:#8A4A3A;margin-bottom:20px"><div class="brief-header" style="color:#C87B6A">▪ SURGE BRIEF — {{surge["entity"].upper()}}</div>{{brief.replace(chr(10), "<br>")}}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="brief-container" style="border-left-color:#8A4A3A;margin-bottom:20px"><div class="brief-header" style="color:#C87B6A">▪ SURGE BRIEF — {surge["entity"].upper()}</div>{brief.replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
 
 
-# ── TAB 5: WEEKLY BRIEF ──────────────────────────────────────────────────────
+# ── TAB 5: WEEKLY BRIEF ──────────────────────────────────────────
 with tab5:
     st.markdown('<div class="section-label">Automated Weekly Intelligence Brief</div>', unsafe_allow_html=True)
-    st.markdown('<div style="font-family:IBM Plex Mono;font-size:10px;color:#3A5068;margin-bottom:20px">Prajna automatically identifies the 5 most strategically significant developments India should monitor.</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-family:IBM Plex Mono;font-size:10px;color:#3A5068;margin-bottom:20px">Prajna automatically identifies the 5 most strategically significant developments India should monitor — zero user input required.</div>', unsafe_allow_html=True)
 
     available_weeks_brief = get_available_weeks()
     week_options_brief    = ["CURRENT WEEK"] + available_weeks_brief
@@ -893,56 +875,35 @@ with tab5:
                         "RETURN a.title AS title, a.source AS source LIMIT 3",
                         {"w": brief_week, "e1": p["e1"], "e2": p["e2"]}
                     ).data()
-                    key = p["e1"] + " <> " + p["e2"]
-                    headlines[key] = arts
+                    headlines[p["e1"] + " <> " + p["e2"]] = arts
 
-            pairs_lines = []
-            for p in top_pairs:
-                pairs_lines.append("  " + p["e1"] + " <> " + p["e2"] + ": " + str(p["co_count"]) + " co-mentions")
-            pairs_str = "".join(pairs_lines)
-
-            hl_lines = []
+            pairs_str = "\n".join([
+                "  " + p["e1"] + " <> " + p["e2"] + ": " + str(p["co_count"]) + " co-mentions"
+                for p in top_pairs
+            ])
+            hl_parts = []
             for key, arts in headlines.items():
-                hl_lines.append(key + ":")
+                hl_parts.append(key + ":")
                 for a in arts:
-                    hl_lines.append("  [" + a["source"] + "] " + a["title"])
-            headlines_str = "".join(hl_lines)
+                    hl_parts.append("  [" + a["source"] + "] " + a["title"])
+            headlines_str = "\n".join(hl_parts)
 
-            prompt_lines = [
-                "You are Prajna, India's strategic intelligence engine.",
-                "Week: " + brief_week,
-                "",
-                "Most active entity relationships this week (knowledge graph):",
-                pairs_str,
-                "",
-                "Supporting headlines:",
-                headlines_str,
-                "",
-                "Generate a WEEKLY INTELLIGENCE BRIEF for Indian policymakers.",
-                "Format exactly as:",
-                "",
-                "WEEK " + brief_week + " - STRATEGIC INTELLIGENCE BRIEF",
-                "",
-                "STORY 1: [headline]",
-                "[2-3 sentences on why this matters for India specifically]",
-                "",
-                "STORY 2: [headline]",
-                "[2-3 sentences]",
-                "",
-                "STORY 3: [headline]",
-                "[2-3 sentences]",
-                "",
-                "STORY 4: [headline]",
-                "[2-3 sentences]",
-                "",
-                "STORY 5: [headline]",
-                "[2-3 sentences]",
-                "",
-                "BOTTOM LINE FOR INDIA: One sentence strategic summary.",
-                "",
-                "Be direct, analytical, India-centric. Max 400 words.",
-            ]
-            prompt = "".join(prompt_lines)
+            prompt = (
+                "You are Prajna, India's strategic intelligence engine.\n"
+                "Week: " + brief_week + "\n\n"
+                "Most active entity relationships this week:\n" + pairs_str + "\n\n"
+                "Supporting headlines:\n" + headlines_str + "\n\n"
+                "Generate a WEEKLY INTELLIGENCE BRIEF for Indian policymakers.\n"
+                "Format exactly as:\n\n"
+                "WEEK " + brief_week + " - STRATEGIC INTELLIGENCE BRIEF\n\n"
+                "STORY 1: [headline]\n[2-3 sentences on why this matters for India]\n\n"
+                "STORY 2: [headline]\n[2-3 sentences]\n\n"
+                "STORY 3: [headline]\n[2-3 sentences]\n\n"
+                "STORY 4: [headline]\n[2-3 sentences]\n\n"
+                "STORY 5: [headline]\n[2-3 sentences]\n\n"
+                "BOTTOM LINE FOR INDIA: One sentence strategic summary.\n\n"
+                "Be direct, analytical, India-centric. Max 400 words."
+            )
             brief_text = ask_groq(prompt)
 
         all_sources = []
@@ -950,8 +911,14 @@ with tab5:
             for a in arts:
                 if a["source"] not in all_sources:
                     all_sources.append(a["source"])
-        source_tags = " ".join(["[" + s + "]" for s in all_sources[:8]])
-
-        header = "WEEKLY BRIEF - " + brief_week + " - " + str(len(top_pairs)) + " signal pairs - " + str(len(names)) + " entities tracked"
-        st.markdown('<div class="brief-container"><div class="brief-header">' + header + '</div>' + brief_text.replace("", "<br>") + '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #1C2A38;font-family:IBM Plex Mono;font-size:9px;color:#3A5068">' + source_tags + '</div></div>', unsafe_allow_html=True)
-
+        src_str = "  ".join(["[" + s + "]" for s in all_sources[:8]])
+        header  = "WEEKLY BRIEF - " + brief_week + " - " + str(len(top_pairs)) + " signal pairs - " + str(len(names)) + " entities tracked"
+        html    = (
+            '<div class="brief-container">'
+            '<div class="brief-header">' + header + '</div>'
+            + brief_text.replace("\n", "<br>")
+            + '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #1C2A38;'
+            'font-family:IBM Plex Mono;font-size:9px;color:#3A5068">' + src_str + '</div>'
+            '</div>'
+        )
+        st.markdown(html, unsafe_allow_html=True)
