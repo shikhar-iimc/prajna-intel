@@ -4,4 +4,3 @@ groq
 pyvis
 requests
 pandas
-spacy==3.7.4
