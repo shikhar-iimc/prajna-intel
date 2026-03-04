@@ -879,8 +879,7 @@ with tab5:
                     ).data()
                     headlines[p["e1"] + " <> " + p["e2"]] = arts
 
-            pairs_str = "
-".join([
+            pairs_str = "".join([
                 "  " + p["e1"] + " <> " + p["e2"] + ": " + str(p["co_count"]) + " co-mentions"
                 for p in top_pairs
             ])
@@ -889,17 +888,11 @@ with tab5:
                 hl_parts.append(key + ":")
                 for a in arts:
                     hl_parts.append("  [" + a["source"] + "] " + a["title"])
-            headlines_str = "
-".join(hl_parts)
+            headlines_str = "".join(hl_parts)
 
             prompt = (
-                "You are Prajna, India's strategic intelligence engine.
-"
-                "Week: " + brief_week + "
-
-"
-                "Most active entity relationships this week:
-" + pairs_str + "
+                "You are Prajna, India's strategic intelligence engine." 
+                "Week: " + brief_week + "" "Most active entity relationships this week:" + pairs_str + "
 
 "
                 "Supporting headlines:
