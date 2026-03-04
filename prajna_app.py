@@ -906,8 +906,7 @@ with tab5:
                 hl_lines.append(key + ":")
                 for a in arts:
                     hl_lines.append("  [" + a["source"] + "] " + a["title"])
-            headlines_str = "
-".join(hl_lines)
+            headlines_str = "".join(hl_lines)
 
             prompt_lines = [
                 "You are Prajna, India's strategic intelligence engine.",
@@ -943,8 +942,7 @@ with tab5:
                 "",
                 "Be direct, analytical, India-centric. Max 400 words.",
             ]
-            prompt = "
-".join(prompt_lines)
+            prompt = "".join(prompt_lines)
             brief_text = ask_groq(prompt)
 
         all_sources = []
@@ -955,6 +953,5 @@ with tab5:
         source_tags = " ".join(["[" + s + "]" for s in all_sources[:8]])
 
         header = "WEEKLY BRIEF - " + brief_week + " - " + str(len(top_pairs)) + " signal pairs - " + str(len(names)) + " entities tracked"
-        st.markdown('<div class="brief-container"><div class="brief-header">' + header + '</div>' + brief_text.replace("
-", "<br>") + '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #1C2A38;font-family:IBM Plex Mono;font-size:9px;color:#3A5068">' + source_tags + '</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="brief-container"><div class="brief-header">' + header + '</div>' + brief_text.replace("", "<br>") + '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #1C2A38;font-family:IBM Plex Mono;font-size:9px;color:#3A5068">' + source_tags + '</div></div>', unsafe_allow_html=True)
 
