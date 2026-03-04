@@ -899,8 +899,7 @@ with tab5:
             pairs_lines = []
             for p in top_pairs:
                 pairs_lines.append("  " + p["e1"] + " <> " + p["e2"] + ": " + str(p["co_count"]) + " co-mentions")
-            pairs_str = "
-".join(pairs_lines)
+            pairs_str = "".join(pairs_lines)
 
             hl_lines = []
             for key, arts in headlines.items():
