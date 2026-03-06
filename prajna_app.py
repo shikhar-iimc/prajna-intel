@@ -652,7 +652,9 @@ st.set_page_config(
     page_title="PRAJNA - Strategic Intelligence",
     page_icon="*",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
+    page_icon="https://raw.githubusercontent.com/shikhar-iimc/prajna-intel/main/prajna_logo_main.svg"
+)
 )
 # ── [END: PAGE CONFIG] ──────────────────────────────────────────
 
