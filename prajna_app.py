@@ -636,7 +636,7 @@ def build_graph_visual(keyword=None, week=None, mode="semantic"):
 
 st.set_page_config(
     page_title="PRAJNA - Strategic Intelligence",
-    page_icon="*",
+    page_icon="https://raw.githubusercontent.com/shikhar-iimc/prajna-intel/main/prajna_logo_main.svg",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
