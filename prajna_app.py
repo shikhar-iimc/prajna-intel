@@ -575,7 +575,7 @@ if LOGO_B64 and LOGO_B64 != "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmc
 
 st.set_page_config(
     page_title="PRAJNA — Intelligence Suite",
-    page_icon=_page_icon,
+    page_icon="https://raw.githubusercontent.com/shikhar-iimc/prajna-intel/main/prajna_logo_main.svg",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
